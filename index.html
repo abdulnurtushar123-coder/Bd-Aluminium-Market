@@ -3665,7 +3665,7 @@ async function ask(q){
   }catch(e){
     console.warn('AI failed',e);t.remove();
     const why=e.code==='quota'||e.code===429?(qbn?'আজকের ফ্রি AI সীমা শেষ বা অনেক দ্রুত প্রশ্ন হয়েছে':'the free AI limit is used up or questions came too fast'):(qbn?'AI সার্ভারে পৌঁছানো যায়নি':'the AI server could not be reached');
-    const r=offline((qbn?'⚠ ':'⚠ ')+why+(qbn?'; অফলাইন বিশ্লেষক উত্তর দিল।':'; the offline analyst answered.'));bubble('bot',r.html,r);
+    const det=String(e.message||'').slice(0,160);const r=offline('⚠ '+why+(qbn?'; অফলাইন বিশ্লেষক উত্তর দিল।':'; the offline analyst answered.')+(det?' ('+det+')':''));bubble('bot',r.html,r);
   }finally{busy=false;}
 }
 function welcome(){prep();L=siteBn()?'bn':'en';
