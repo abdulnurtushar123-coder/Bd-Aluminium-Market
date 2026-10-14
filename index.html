@@ -613,8 +613,8 @@ table.dt tbody tr:hover td{background:color-mix(in srgb,var(--brand) 8%,transpar
 @media (max-width:760px){#backBtn span{display:none}#backBtn{width:38px;padding:0;justify-content:center}}
 @media (prefers-reduced-motion:reduce){.topbar::after{animation:none}}
 /* ===== Market Analyst chat ===== */
-.totop{bottom:calc(92px + env(safe-area-inset-bottom,0px))}
-.ma-fab{position:fixed;z-index:60;right:max(18px,env(safe-area-inset-right,0px));bottom:calc(18px + env(safe-area-inset-bottom,0px));display:inline-flex;align-items:center;gap:9px;
+.totop{bottom:calc(150px + env(safe-area-inset-bottom,0px))}
+.ma-fab{position:fixed;z-index:60;right:max(18px,env(safe-area-inset-right,0px));bottom:calc(76px + env(safe-area-inset-bottom,0px));display:inline-flex;align-items:center;gap:9px;
   border:1px solid rgba(255,255,255,.35);border-radius:999px;padding:12px 18px 12px 14px;color:#fff;font:600 14.5px var(--body);cursor:pointer;
   background:linear-gradient(120deg,#4f46e5,#7c3aed 50%,#db2777 85%,#f97316);box-shadow:0 1px 0 rgba(255,255,255,.35) inset,0 14px 34px -10px rgba(124,58,237,.75);transition:transform .15s,box-shadow .15s}
 .ma-fab svg{width:22px;height:22px}
@@ -622,7 +622,7 @@ table.dt tbody tr:hover td{background:color-mix(in srgb,var(--brand) 8%,transpar
 .ma-fab::after{content:"";position:absolute;inset:-4px;border-radius:999px;border:2px solid rgba(167,139,250,.6);animation:maPulse 2.4s ease-out infinite;pointer-events:none}
 .ma-fab.on::after{display:none}
 @keyframes maPulse{0%{opacity:.9;transform:scale(1)}100%{opacity:0;transform:scale(1.18)}}
-.ma-panel{position:fixed;z-index:61;right:max(18px,env(safe-area-inset-right,0px));bottom:calc(84px + env(safe-area-inset-bottom,0px));width:min(500px,calc(100vw - 36px));height:min(660px,calc(100vh - var(--top) - 110px));
+.ma-panel{position:fixed;z-index:61;right:max(18px,env(safe-area-inset-right,0px));bottom:calc(142px + env(safe-area-inset-bottom,0px));width:min(500px,calc(100vw - 36px));height:min(660px,calc(100vh - var(--top) - 168px));
   display:flex;flex-direction:column;border-radius:24px;overflow:hidden;
   background:linear-gradient(var(--g-fill-solid),var(--g-fill-solid)) padding-box,linear-gradient(140deg,#a78bfa,rgba(255,255,255,.3) 40%,#f472b6) border-box;border:1.5px solid transparent;
   -webkit-backdrop-filter:blur(28px) saturate(170%);backdrop-filter:blur(28px) saturate(170%);box-shadow:var(--g-sh-hi);animation:pop .22s cubic-bezier(.2,.8,.2,1)}
@@ -683,6 +683,8 @@ table.dt tbody tr:hover td{background:color-mix(in srgb,var(--brand) 8%,transpar
 .ma-step{font-size:12px;color:var(--muted);margin-left:8px;align-self:center}
 .ma-b ol.ma-ul{padding-left:20px}
 .ma-b code{font-size:12.5px;background:var(--panel-2);padding:0 4px;border-radius:4px}
+
+@media (max-width:600px){.ma-panel{bottom:0}}
 </style>
 </head>
 <body>

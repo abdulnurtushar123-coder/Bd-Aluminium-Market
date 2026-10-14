@@ -70,30 +70,62 @@ function cleanContents(contents) {
   return out;
 }
 
-async function callGemini(model, key, body) {
-  const r = await fetch(API + encodeURIComponent(model) + ':generateContent', {
-    method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify(body)
+async function callGemini(model, key, body, ms = 28000) {
+  try {
+    const r = await fetch(API + encodeURIComponent(model) + ':generateContent', {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify(body),
+      signal: AbortSignal.timeout(ms)
+    });
+    const data = await r.json().catch(() => ({}));
+    return { ok: r.ok, status: r.status, data };
+  } catch (e) {
+    const to = String(e && e.name).includes('Timeout') || String(e).includes('timed out') || String(e).includes('aborted');
+    return { ok: false, status: to ? 'timeout' : 'fetch_failed', data: { error: { message: to ? `no reply from ${model} within ${Math.round(ms / 1000)}s` : String(e).slice(0, 200) } } };
+  }
+}
+
+// keep the connection alive with spaces while Gemini thinks, then send the JSON
+// (leading spaces are valid JSON whitespace, so the browser parses it normally)
+function streamJSON(work) {
+  const enc = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(ctrl) {
+      ctrl.enqueue(enc.encode(' '));
+      const ka = setInterval(() => { try { ctrl.enqueue(enc.encode(' ')); } catch { } }, 4000);
+      let out;
+      try { out = await work(); } catch (e) { out = { error: 'crash', message: String(e && e.message || e).slice(0, 300) }; }
+      clearInterval(ka);
+      ctrl.enqueue(enc.encode(JSON.stringify(out)));
+      ctrl.close();
+    }
   });
-  const data = await r.json().catch(() => ({}));
-  return { ok: r.ok, status: r.status, data };
+  return new Response(stream, { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
+}
+
+// faster answers: keep "thinking" short (each tool step is a separate request)
+const thinkFor = m => /gemini-2\.5/.test(m) ? { thinkingBudget: 1024 } : /gemini-[3-9]/.test(m) ? { thinkingLevel: 'low' } : null;
+async function askModel(model, key, base, ms) {
+  const t = thinkFor(model);
+  let r = await callGemini(model, key, t ? { ...base, generationConfig: { ...base.generationConfig, thinkingConfig: t } } : base, ms);
+  if (!r.ok && r.status === 400 && t && /think/i.test(JSON.stringify(r.data))) r = await callGemini(model, key, base, ms); // model does not take that setting
+  return r;
 }
 
 export default async (req, context) => {
   const key = ENV('GEMINI_API_KEY');
   if (req.method === 'GET') {
     const u = new URL(req.url);
-    if (u.searchParams.get('test') && key) {
-      const out = [];
-      for (const model of [PRIMARY, ...FALLBACKS]) {
-        const t0 = Date.now();
-        try {
-          const r = await callGemini(model, key, { systemInstruction: { parts: [{ text: SYSTEM }] }, tools: TOOLS, contents: [{ role: 'user', parts: [{ text: 'Reply only with the word OK.' }] }], generationConfig: { maxOutputTokens: 16384 } });
-          const txt = r.ok ? ((r.data.candidates || [])[0]?.content?.parts || []).map(p => p.text || (p.functionCall ? '[tool:' + p.functionCall.name + ']' : '')).join('').slice(0, 60) : '';
-          out.push({ model, status: r.status, ms: Date.now() - t0, reply: txt, error: r.ok ? null : String(r.data?.error?.message || '').slice(0, 220) });
-          if (r.ok) break;
-        } catch (e) { out.push({ model, status: 'fetch_failed', ms: Date.now() - t0, error: String(e).slice(0, 220) }); }
-      }
-      return json({ configured: true, key_prefix: key.slice(0, 4) + '…', tests: out });
+    if (u.searchParams.get('test')) {
+      if (!key) return json({ configured: false });
+      return streamJSON(async () => {
+        const base = { systemInstruction: { parts: [{ text: SYSTEM }] }, tools: TOOLS, contents: [{ role: 'user', parts: [{ text: 'Reply only with the word OK.' }] }], generationConfig: { maxOutputTokens: 16384 } };
+        const tests = await Promise.all([PRIMARY, ...FALLBACKS].map(async model => {
+          const t0 = Date.now(); const r = await askModel(model, key, base, 25000);
+          const reply = r.ok ? ((r.data.candidates || [])[0]?.content?.parts || []).filter(p => !p.thought).map(p => p.text || (p.functionCall ? '[tool:' + p.functionCall.name + ']' : '')).join('').slice(0, 60) : '';
+          return { model, status: r.status, seconds: +((Date.now() - t0) / 1000).toFixed(1), reply, error: r.ok ? null : String(r.data?.error?.message || '').slice(0, 220) };
+        }));
+        return { configured: true, key_prefix: key.slice(0, 4) + '…', working: tests.filter(t => t.status === 200).map(t => t.model), tests };
+      });
     }
     return json({ ok: true, configured: !!key, model: PRIMARY, runtime: 'edge' });
   }
@@ -106,29 +138,29 @@ export default async (req, context) => {
   let body; try { body = JSON.parse(raw); } catch { return json({ error: 'bad_json' }, 400); }
   const contents = cleanContents(body.contents);
   if (!contents) return json({ error: 'bad_contents' }, 400);
-
-  const payload = {
+  const base = {
     systemInstruction: { parts: [{ text: SYSTEM + (body.today ? `\nToday is ${String(body.today).slice(0, 40)}.` : '') }] },
     contents, tools: TOOLS,
     toolConfig: { functionCallingConfig: { mode: 'AUTO' } },
     generationConfig: { temperature: 0.4, maxOutputTokens: 16384 }
   };
-  let last = null;
-  for (const model of [PRIMARY, ...FALLBACKS]) {
-    try {
-      const r = await callGemini(model, key, payload);
+  return streamJSON(async () => {
+    let last = null; const tried = [];
+    for (const model of [PRIMARY, ...FALLBACKS]) {
+      const r = await askModel(model, key, base, 40000);
+      tried.push(model + ':' + r.status);
       if (r.ok) {
         const cand = (r.data.candidates || [])[0];
-        if (!cand || !cand.content) return json({ error: 'empty', finishReason: cand && cand.finishReason, model }, 502);
-        return json({ model, content: cand.content, finishReason: cand.finishReason, usage: r.data.usageMetadata });
+        if (cand && cand.content && (cand.content.parts || []).length) return { model, content: cand.content, finishReason: cand.finishReason, usage: r.data.usageMetadata };
+        last = { status: 'empty', data: { error: { message: 'empty reply (' + (cand && cand.finishReason) + ')' } } };
+        continue;
       }
       last = r;
-      if (![400, 403, 404, 429, 500, 503].includes(r.status)) break; // only fall back on availability / quota errors
-    } catch (e) { last = { status: 502, data: { error: { message: String(e) } } }; }
-  }
-  const msg = last && last.data && last.data.error ? last.data.error.message : 'Gemini request failed';
-  return json({ error: last && last.status === 429 ? 'quota' : 'upstream', status: last && last.status, message: msg }, last && last.status === 429 ? 429 : 502);
+      if (![400, 403, 404, 429, 500, 503, 'timeout', 'fetch_failed'].includes(r.status)) break;
+    }
+    const msg = last && last.data && last.data.error ? last.data.error.message : 'Gemini request failed';
+    return { error: last && last.status === 429 ? 'quota' : 'upstream', status: last && last.status, message: msg, tried };
+  });
 };
 
 export const config = { path: '/api/ask' };
-
